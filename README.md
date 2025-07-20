@@ -74,17 +74,16 @@ func main() {
 ### With Worker Timeouts
 
 ```go
-timeout := 5 * time.Second
+timeout := 1 * time.Second
 streamer, err := streamer.NewStreamer(streamer.NewStreamerParams[string, string]{
     WorkerCount:   4,
     TimeoutWorker: &timeout,
     Work: func(ctx context.Context, data string) (string, error) {
-        // Simulate work that might take too long
         select {
         case <-time.After(2 * time.Second):
-            return "processed: " + data, nil
+            return "processed: " + data, nil // This will not select, the timeout will happen first.
         case <-ctx.Done():
-            return "", ctx.Err() // Will return timeout error
+            return "", ctx.Err()
         }
     },
 })
