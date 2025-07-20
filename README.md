@@ -92,7 +92,7 @@ streamer, err := streamer.NewStreamer(streamer.NewStreamerParams[string, string]
 ### With Quit Channel
 
 ```go
-quit := make(chan int)
+quit := make(chan int) // Signaling on this channel will kill workers
 streamer, err := streamer.NewStreamer(streamer.NewStreamerParams[int, string]{
     WorkerCount: 2,
     Quit:        quit,
@@ -100,15 +100,11 @@ streamer, err := streamer.NewStreamer(streamer.NewStreamerParams[int, string]{
         return fmt.Sprintf("item-%d", n), nil
     },
 })
-
-// Later, signal all workers to quit
-close(quit)
 ```
 
 ### Building Pipelines
 
 ```go
-// First stage: convert strings to integers
 stage1, _ := streamer.NewStreamer(streamer.NewStreamerParams[string, int]{
     WorkerCount: 2,
     Work: func(ctx context.Context, s string) (int, error) {
@@ -116,7 +112,6 @@ stage1, _ := streamer.NewStreamer(streamer.NewStreamerParams[string, int]{
     },
 })
 
-// Second stage: square the integers  
 stage2, _ := streamer.NewStreamer(streamer.NewStreamerParams[int, int]{
     WorkerCount: 3,
     Work: func(ctx context.Context, n int) (int, error) {
@@ -124,12 +119,10 @@ stage2, _ := streamer.NewStreamer(streamer.NewStreamerParams[int, int]{
     },
 })
 
-// Chain them together
 input := make(chan string)
 results1, errors1, _ := stage1.Stream(ctx, input)
 results2, errors2, _ := stage2.Stream(ctx, results1)
 
-// Handle final results and errors from both stages
 ```
 
 ## Requirements
