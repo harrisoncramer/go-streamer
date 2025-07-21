@@ -14,13 +14,14 @@ import (
 // Unlike the errgroup package, it handles multiple workers for you and streams the results.
 // You can chain together the output of one streamer to another streamer in order to build pipelines for processing data.
 type Streamer[T any, K any] struct {
-	workerCount   int
-	quit          <-chan int
-	work          func(context.Context, T) (K, error)
-	isProcessing  bool
-	mu            sync.RWMutex
-	wg            *sync.WaitGroup
-	workerTimeout *time.Duration
+	workerCount     int
+	quit            <-chan int
+	work            func(context.Context, T) (K, error)
+	isProcessing    bool
+	mu              sync.RWMutex
+	wg              *sync.WaitGroup
+	workerTimeout   *time.Duration
+	streamerTimeout *time.Duration
 }
 
 type NewStreamerParams[T any, K any] struct {
@@ -50,41 +51,53 @@ func NewStreamer[T any, K any](params NewStreamerParams[T, K]) (*Streamer[T, K],
 	}
 
 	return &Streamer[T, K]{
-		workerCount:   params.WorkerCount,
-		quit:          params.Quit,
-		work:          params.Work,
-		workerTimeout: params.WorkerTimeout,
-		wg:            &sync.WaitGroup{},
+		workerCount:     params.WorkerCount,
+		quit:            params.Quit,
+		work:            params.Work,
+		workerTimeout:   params.WorkerTimeout,
+		streamerTimeout: params.StreamerTimeout,
+		wg:              &sync.WaitGroup{},
 	}, nil
 }
 
 // Stream pipes the inputs provided through the streamer's work function and returns result and error channels.
-func (p *Streamer[T, K]) Stream(ctx context.Context, inputChan <-chan T) (<-chan K, <-chan error, error) {
+func (s *Streamer[T, K]) Stream(ctx context.Context, inputChan <-chan T) (<-chan K, <-chan error, error) {
 
-	p.mu.Lock()
-	if p.isProcessing {
-		p.mu.Unlock()
+	var cancel context.CancelFunc
+	if s.streamerTimeout != nil {
+		ctx, cancel = context.WithTimeout(ctx, *s.streamerTimeout)
+	}
+
+	s.mu.Lock()
+	if s.isProcessing {
+		s.mu.Unlock()
+		if cancel != nil {
+			cancel()
+		}
 		return nil, nil, errors.New("processor is already working")
 	}
-	p.isProcessing = true
-	p.mu.Unlock()
+	s.isProcessing = true
+	s.mu.Unlock()
 
 	// Use FanOut to distribute work
 	workerChannels, err := internal.FanOut(ctx, internal.FanOutParams[T]{
 		Input:       inputChan,
-		WorkerCount: p.workerCount,
-		Quit:        p.quit,
+		WorkerCount: s.workerCount,
+		Quit:        s.quit,
 	})
 	if err != nil {
+		if cancel != nil {
+			cancel()
+		}
 		return nil, nil, err
 	}
 
 	// Create result channels for each worker
 	var outputChannels []<-chan K
-	errorChan := make(chan error, p.workerCount*10) // Buffer error channel, to reduce slowdown
+	errorChan := make(chan error, s.workerCount*10) // Buffer error channel, to reduce slowdown
 
 	for i, workerChannel := range workerChannels {
-		p.wg.Add(1)
+		s.wg.Add(1)
 
 		// For each worker channel, create a result channel
 		outputChan := make(chan K)
@@ -94,14 +107,14 @@ func (p *Streamer[T, K]) Stream(ctx context.Context, inputChan <-chan T) (<-chan
 		// Take the value read, and pass it to the work function. Send any errors to the error channel and any outputs to the output channel.
 		go func(workerID int, inputs <-chan T, output chan<- K) {
 			defer close(output)
-			defer p.wg.Done()
+			defer s.wg.Done()
 			for input := range inputs {
 				workCtx := ctx
 				var cancel context.CancelFunc
-				if p.workerTimeout != nil {
-					workCtx, cancel = context.WithTimeout(ctx, *p.workerTimeout)
+				if s.workerTimeout != nil {
+					workCtx, cancel = context.WithTimeout(ctx, *s.workerTimeout)
 				}
-				res, err := p.work(workCtx, input)
+				res, err := s.work(workCtx, input)
 
 				if cancel != nil {
 					cancel()
@@ -118,30 +131,30 @@ func (p *Streamer[T, K]) Stream(ctx context.Context, inputChan <-chan T) (<-chan
 
 	// Close the error channel and reset the streamer's state when workers finish
 	go func() {
-		p.wg.Wait()
+		s.wg.Wait()
 		close(errorChan)
-		p.mu.Lock()
-		p.wg = nil
-		p.isProcessing = false
-		p.mu.Unlock()
-
+		if cancel != nil {
+			cancel()
+		}
+		s.mu.Lock()
+		s.wg = nil
+		s.isProcessing = false
 	}()
 
 	// Use FanIn to aggregate results from all the workers, and return the single channel
 	results, err := internal.FanIn(ctx, internal.FanInParams[K]{
 		InputChannels: outputChannels,
-		Quit:          p.quit,
+		Quit:          s.quit,
 	})
 
 	return results, errorChan, err
 }
 
 // Flush can be used ensure that all of the values supplied to the streamer's input channel have been worked.
-func (p *Streamer[T, K]) Flush() {
-	p.mu.RLock()
-	wg := p.wg
-	p.mu.RUnlock()
-
+func (s *Streamer[T, K]) Flush() {
+	s.mu.RLock()
+	wg := s.wg
+	s.mu.RUnlock()
 	if wg != nil {
 		wg.Wait()
 	}

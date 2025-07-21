@@ -475,3 +475,152 @@ func TestStreamer_WorkerTimeout(t *testing.T) {
 		})
 	}
 }
+
+func TestStreamer_StreamerTimeout(t *testing.T) {
+	tests := []struct {
+		name             string
+		inputs           []int
+		workerCount      int
+		streamerTimeout  *time.Duration
+		workDuration     time.Duration
+		expectedMaxItems int // Maximum items we expect to be processed before timeout
+		expectTimeout    bool
+	}{
+		{
+			name:             "no timeout - all items processed",
+			inputs:           []int{1, 2, 3, 4, 5},
+			workerCount:      2,
+			streamerTimeout:  nil,
+			workDuration:     50 * time.Millisecond,
+			expectedMaxItems: 5,
+			expectTimeout:    false,
+		},
+		{
+			name:             "timeout longer than total work - all succeed",
+			inputs:           []int{1, 2, 3},
+			workerCount:      2,
+			streamerTimeout:  func() *time.Duration { d := 300 * time.Millisecond; return &d }(),
+			workDuration:     50 * time.Millisecond, // Total: ~150ms with 2 workers
+			expectedMaxItems: 3,
+			expectTimeout:    false,
+		},
+		{
+			name:             "timeout shorter than total work - early termination",
+			inputs:           []int{1, 2, 3, 4, 5, 6},
+			workerCount:      2,
+			streamerTimeout:  func() *time.Duration { d := 100 * time.Millisecond; return &d }(),
+			workDuration:     60 * time.Millisecond, // Would take ~180ms total
+			expectedMaxItems: 4,                     // Should process two batches
+			expectTimeout:    true,
+		},
+		{
+			name:             "very short timeout - timing verification",
+			inputs:           []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}, // Many items
+			workerCount:      3,
+			streamerTimeout:  func() *time.Duration { d := 30 * time.Millisecond; return &d }(),
+			workDuration:     50 * time.Millisecond,
+			expectedMaxItems: 3, // All three workers will start but the rest will not.
+			expectTimeout:    true,
+		},
+		{
+			name:             "single worker with timeout",
+			inputs:           []int{1, 2, 3, 4},
+			workerCount:      1,
+			streamerTimeout:  func() *time.Duration { d := 80 * time.Millisecond; return &d }(),
+			workDuration:     50 * time.Millisecond, // Would take 200ms total
+			expectedMaxItems: 2,                     // Should get ~1-2 items
+			expectTimeout:    true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			streamer, err := NewStreamer(NewStreamerParams[int, string]{
+				WorkerCount:     tt.workerCount,
+				StreamerTimeout: tt.streamerTimeout,
+				Work: func(ctx context.Context, n int) (string, error) {
+					select {
+					case <-time.After(tt.workDuration):
+						return fmt.Sprintf("processed-%d", n), nil
+					case <-ctx.Done():
+						return "", ctx.Err()
+					}
+				},
+			})
+			require.NoError(t, err)
+
+			// Setup input channel
+			input := make(chan int, len(tt.inputs))
+			for _, v := range tt.inputs {
+				input <- v
+			}
+			close(input)
+
+			// Record start time to verify timeout timing
+			start := time.Now()
+
+			// Process
+			resultChan, errorChan, err := streamer.Stream(context.Background(), input)
+			require.NoError(t, err)
+			require.NotNil(t, resultChan)
+			require.NotNil(t, errorChan)
+
+			// Collect results and errors with reasonable timeout for test
+			results := collectProcessorResults(t, resultChan, 1*time.Second)
+			errorVals := collectProcessorErrors(t, errorChan, 1*time.Second)
+			duration := time.Since(start)
+
+			// Verify processing was interrupted if timeout was expected
+			if tt.expectTimeout {
+				// Should have processed fewer items than total input
+				totalProcessed := len(results) + len(errorVals)
+				assert.LessOrEqual(t, totalProcessed, tt.expectedMaxItems,
+					"Should have processed at most %d items due to timeout, got %d results + %d errors",
+					tt.expectedMaxItems, len(results), len(errorVals))
+
+				// Should have completed faster than it would take to process all items
+				maxExpectedDuration := time.Duration(len(tt.inputs)) * tt.workDuration / time.Duration(tt.workerCount) * 2
+				assert.Less(t, duration, maxExpectedDuration,
+					"Processing should have been interrupted by timeout")
+
+				// Should have timeout-related errors
+				var timeoutErrors int
+				for _, err := range errorVals {
+					if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+						timeoutErrors++
+					}
+				}
+				assert.Greater(t, timeoutErrors, 0, "Expected some timeout/cancellation errors")
+
+				// Timing should be approximately the timeout duration (with some tolerance)
+				if tt.streamerTimeout != nil {
+					tolerance := 50 * time.Millisecond
+					expectedDuration := *tt.streamerTimeout
+					assert.Greater(t, duration, expectedDuration-tolerance,
+						"Duration should be at least the timeout duration")
+					assert.Less(t, duration, expectedDuration+tolerance,
+						"Duration should not exceed timeout by much")
+				}
+			} else {
+				// All items should be processed successfully
+				assert.Equal(t, len(tt.inputs), len(results), "All items should be processed without timeout")
+				assert.Equal(t, 0, len(errorVals), "Should have no errors without timeout")
+			}
+
+			// Verify channels are closed
+			select {
+			case _, ok := <-resultChan:
+				assert.False(t, ok, "Result channel should be closed")
+			default:
+				t.Error("Result channel should be closed and readable")
+			}
+
+			select {
+			case _, ok := <-errorChan:
+				assert.False(t, ok, "Error channel should be closed")
+			default:
+				t.Error("Error channel should be closed and readable")
+			}
+		})
+	}
+}
