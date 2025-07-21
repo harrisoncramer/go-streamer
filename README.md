@@ -2,7 +2,7 @@
 
 This Go module provides an abstraction for streaming data through user-defined "work" functions and aggregating the results, in multiple concurrent goroutines. 
 
-It hides the complexity of distributing the work, aggregating results, handling timeouts, and collecting errors, and lets users focus on their application business logic. It's well-suited for optimizing in-memory processing of data, where persistence and retry mechanisms are unimportant, as the module has no persistence layer. 
+It hides the complexity of distributing the work, aggregating results, handling timeouts, and collecting errors, and lets users focus on their application business logic. It's well-suited for optimizing in-memory processing of data, where persistence is unimportant, as the module has no persistence layer. 
 
 This module has no external dependencies.
 
@@ -11,6 +11,7 @@ This module has no external dependencies.
 - **Generic Types**: Works with any input type `T` and output type `K`
 - **Concurrent Processing**: Configurable number of worker goroutines
 - **Worker Timeouts**: Set timeouts per worker operation to prevent hanging
+- **Retry Support**: Configurable backoffs and retry mechanism for failing workers
 - **Error Handling**: Separate channels for results and errors
 - **Graceful Shutdown**: Support for quit channels and context cancellation  
 
@@ -122,7 +123,41 @@ stage2, _ := streamer.NewStreamer(streamer.NewStreamerParams[int, int]{
 input := make(chan string)
 results1, errors1, _ := stage1.Stream(ctx, input)
 results2, errors2, _ := stage2.Stream(ctx, results1)
+```
 
+### Adding Retries
+
+```go
+streamer, _ := NewStreamer(NewStreamerParams[int, string]{
+    WorkerCount: 5,
+    Work: CreateRetryableWorkFunc(
+        originalWorkFunc,
+        WithRetries(3),
+        WithLinearBackoff(),
+        WithRetryCondition(func(err error) bool {
+            return errors.As(err, &someSentinelError)
+        }),
+    ),
+})
+```
+
+And a more complex example:
+
+```go
+streamer, _ := NewStreamer(NewStreamerParams[int, string]{
+    WorkerCount: 5,
+    Work: CreateRetryableWorkFunc(
+        originalWorkFunc,
+        WithRetries(3),
+        WithExponentialBackoff(),
+        WithRetryCondition(AnyOf(
+            WithRetryCondition(func(err error) bool {
+                return someBusinessLogic()
+            }),
+            WithRetryOnErrors(ErrRateLimited, ErrServiceBusy),
+        )),
+    ),
+})
 ```
 
 ## Requirements
