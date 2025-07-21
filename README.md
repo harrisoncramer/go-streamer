@@ -2,7 +2,7 @@
 
 This Go module provides an abstraction for streaming data through user-defined "work" functions and aggregating the results, in multiple concurrent goroutines. 
 
-It hides the complexity of distributing the work, aggregating results, handling timeouts, and collecting errors, and lets letting consumers focus on their application business logic. It's well-suited for optimizing in-memory processing of data, where persistence and retry mechanisms are unimportant, as the module has no persistence layer. 
+It hides the complexity of distributing the work, aggregating results, handling timeouts, and collecting errors, and lets users focus on their application business logic. It's well-suited for optimizing in-memory processing of data, where persistence and retry mechanisms are unimportant, as the module has no persistence layer. 
 
 This module has no external dependencies.
 
