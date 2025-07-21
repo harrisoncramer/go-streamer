@@ -27,48 +27,64 @@ go get github.com/harrisoncramer/streamer
 package main
 
 import (
-    "context"
-    "fmt"
-    "time"
-    "github.com/harrisoncramer/streamer"
+	"context"
+	"errors"
+	"fmt"
+	"math/rand"
+	"time"
+    "log"
+
+	"github.com/harrisoncramer/streamer"
 )
 
 func main() {
-    // Create a streamer that squares integers
-    streamer, err := streamer.NewStreamer(streamer.NewStreamerParams[int, int]{
-        WorkerCount: 3,
-        Work: func(ctx context.Context, n int) (int, error) {
-            return n * n, nil
-        },
-    })
-    if err != nil {
-        panic(err)
-    }
+	// Create a streamer that squares integers
+	streamer, err := streamer.NewStreamer(streamer.NewStreamerParams[int, int]{
+		WorkerCount: 1,
+		Work: streamer.CreateRetryableWorkFunc(
+			func(ctx context.Context, n int) (int, error) {
+				rand := rand.Intn(10)
+				if rand > 5 {
+					return 0, errors.New("some random error")
+				}
+				return n * n, nil
+			},
+			streamer.WithFixedBackoff(200*time.Millisecond),
+			streamer.WithRetryCondition(func(error) bool { return true }),
+			streamer.WithRetries(5),
+		),
+	})
 
-    // Create input channel
-    input := make(chan int, 5)
-    input <- 1
-    input <- 2  
-    input <- 3
-    input <- 4
-    input <- 5
-    close(input)
+	if err != nil {
+		panic(err)
+	}
 
-    // Process the data
-    results, errors, err := streamer.Stream(context.Background(), input)
-    if err != nil {
-        panic(err)
-    }
+	// Create input channel
+	input := make(chan int, 10_000)
+	for i := range 10_000 {
+		input <- i
+	}
+	close(input)
 
-    // Collect results
-    for result := range results {
-        fmt.Printf("Result: %d\n", result)
-    }
+	// Process the data
+	results, errors, err := streamer.Stream(context.Background(), input)
+	if err != nil {
+        log.Fatal(err)
+	}
 
-    // Check for errors
-    for err := range errors {
-        fmt.Printf("Error: %v\n", err)
-    }
+	go func() {
+		for result := range results {
+			fmt.Printf("Result: %d\n", result)
+		}
+	}()
+
+	go func() {
+		for err := range errors {
+			fmt.Printf("Error: %v\n", err)
+		}
+	}()
+
+	streamer.Flush()
 }
 ```
 
