@@ -139,6 +139,7 @@ func (s *Streamer[T, K]) Stream(ctx context.Context, inputChan <-chan T) (<-chan
 		s.mu.Lock()
 		s.wg = nil
 		s.isProcessing = false
+		s.mu.Unlock()
 	}()
 
 	// Use FanIn to aggregate results from all the workers, and return the single channel
