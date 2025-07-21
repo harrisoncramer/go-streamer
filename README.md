@@ -1,10 +1,10 @@
 # streamer
 
-This package provides in-memory processor for streaming data through user-defined "work" functions. 
+This Go module provides an abstraction for streaming data through user-defined "work" functions and aggregating the results, in multiple concurrent goroutines. 
 
-The processor hides away the complexity of distributing work to worker routines and aggregating the results, letting consumers focus on business logic.
+It hides the complexity of distributing the work, aggregating results, handling timeouts, and collecting errors, and lets letting consumers focus on their application business logic. It's well-suited for optimizing in-memory processing of data, where persistence and retry mechanisms are unimportant, as the module has no persistence layer. 
 
-It's well-suited for in-memory processing, particularly pipelines, where data persistence is unimportant, as the package has no persistence layer. The `streamer` package has no external dependencies.
+This module has no external dependencies.
 
 ## Features
 
