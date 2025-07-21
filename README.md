@@ -1,8 +1,10 @@
 # streamer
 
-This module implements a generic streamer package for Go.
+This package provides in-memory processor for streaming data through user-defined "work" functions. 
 
-The streamer is capable of accepting inputs from an input worker and distributing the work in round-robin fashion to a set of worker routines, and then streaming the results to an output channel.
+The processor hides away the complexity of distributing work to worker routines and aggregating the results, letting consumers focus on business logic.
+
+It's well-suited for in-memory processing, particularly pipelines, where data persistence is unimportant, as the package has no persistence layer. The `streamer` package has no external dependencies.
 
 ## Features
 
@@ -128,11 +130,3 @@ results2, errors2, _ := stage2.Stream(ctx, results1)
 ## Requirements
 
 - Go 1.21+ (for generic type parameters)
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Add tests for new functionality  
-4. Ensure all tests pass
-5. Submit a pull request
