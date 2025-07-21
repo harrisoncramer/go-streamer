@@ -100,7 +100,7 @@ func (s *Streamer[T, K]) Stream(ctx context.Context, inputChan <-chan T) (<-chan
 		s.wg.Add(1)
 
 		// For each worker channel, create a result channel
-		outputChan := make(chan K)
+		outputChan := make(chan K, 100)
 		outputChannels = append(outputChannels, outputChan)
 
 		// Spawn a goroutine for each read off of the fanned out workers.
@@ -133,13 +133,13 @@ func (s *Streamer[T, K]) Stream(ctx context.Context, inputChan <-chan T) (<-chan
 	go func() {
 		s.wg.Wait()
 		close(errorChan)
-		if cancel != nil {
-			cancel()
-		}
 		s.mu.Lock()
 		s.wg = nil
 		s.isProcessing = false
 		s.mu.Unlock()
+		if cancel != nil {
+			cancel()
+		}
 	}()
 
 	// Use FanIn to aggregate results from all the workers, and return the single channel

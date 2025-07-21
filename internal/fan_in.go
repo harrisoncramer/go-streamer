@@ -22,7 +22,7 @@ func FanIn[K any](ctx context.Context, params FanInParams[K]) (chan K, error) {
 
 	wg.Add(len(params.InputChannels)) // Add one to waitgroup for each channel
 
-	output := make(chan K) // Output is the result of consuming one "K" from the channel
+	output := make(chan K, 100) // Output is the result of consuming one "K" from the channel
 
 	for _, c := range params.InputChannels { // Start a goroutine for every channel
 		go func(ctx context.Context, channel <-chan K) {
