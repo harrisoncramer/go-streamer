@@ -71,8 +71,6 @@ func main() {
 }
 ```
 
-## Advanced Usage
-
 ### With Worker Timeouts
 
 ```go
