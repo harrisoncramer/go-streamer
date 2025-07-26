@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"runtime"
 	"testing"
 	"time"
 
@@ -623,73 +622,5 @@ func TestStreamer_StreamerTimeout(t *testing.T) {
 				t.Error("Error channel should be closed and readable")
 			}
 		})
-	}
-}
-
-func BenchmarkStreamer_IOBound(b *testing.B) {
-	itemCounts := []int{10, 50, 100}
-	delays := []time.Duration{1 * time.Millisecond, 5 * time.Millisecond, 10 * time.Millisecond}
-	workerCounts := []int{1, 2, 4, 8, 16, runtime.NumCPU()}
-
-	for _, itemCount := range itemCounts {
-		for _, delay := range delays {
-			for _, workers := range workerCounts {
-				b.Run(fmt.Sprintf("items-%d/delay-%dms/workers-%d", itemCount, delay.Milliseconds(), workers), func(b *testing.B) {
-					b.ResetTimer()
-					b.ReportAllocs()
-
-					for b.Loop() {
-						streamer, err := NewStreamer(NewStreamerParams[int, string]{
-							WorkerCount: workers,
-							Work: func(ctx context.Context, input int) (string, error) {
-								// Simulate I/O-bound work (network call, DB query, etc.)
-								select {
-								case <-time.After(delay):
-									return fmt.Sprintf("result-%d", input), nil
-								case <-ctx.Done():
-									return "", ctx.Err()
-								}
-							},
-						})
-						if err != nil {
-							b.Fatal(err)
-						}
-
-						ctx := b.Context()
-						inputChan := make(chan int, itemCount)
-
-						// Generate test data
-						go func() {
-							defer close(inputChan)
-							for j := range itemCount {
-								inputChan <- j
-							}
-						}()
-
-						results, errs, err := streamer.Stream(ctx, inputChan)
-						if err != nil {
-							b.Fatal(err)
-						}
-
-						// Consume results
-						go func() {
-							for range results {
-								// consume
-							}
-						}()
-
-						go func() {
-							for err := range errs {
-								if err != nil {
-									b.Errorf("Unexpected error: %v", err)
-								}
-							}
-						}()
-
-						streamer.Flush()
-					}
-				})
-			}
-		}
 	}
 }

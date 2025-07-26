@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/harrisoncramer/streamer/internal"
+	"github.com/harrisoncramer/streamer/fan"
 )
 
 // Streamer helps process items of type T in parallel, using a worker function that returns results of type K.
@@ -80,7 +80,7 @@ func (s *Streamer[T, K]) Stream(ctx context.Context, inputChan <-chan T) (<-chan
 	s.mu.Unlock()
 
 	// Use FanOut to distribute work
-	workerChannels, err := internal.FanOut(ctx, internal.FanOutParams[T]{
+	workerChannels, err := fan.FanOut(ctx, fan.FanOutParams[T]{
 		Input:       inputChan,
 		WorkerCount: s.workerCount,
 		Quit:        s.quit,
@@ -143,7 +143,7 @@ func (s *Streamer[T, K]) Stream(ctx context.Context, inputChan <-chan T) (<-chan
 	}()
 
 	// Use FanIn to aggregate results from all the workers, and return the single channel
-	results, err := internal.FanIn(ctx, internal.FanInParams[K]{
+	results, err := fan.FanIn(ctx, fan.FanInParams[K]{
 		InputChannels: outputChannels,
 		Quit:          s.quit,
 	})

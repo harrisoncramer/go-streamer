@@ -1,4 +1,4 @@
-package internal
+package fan
 
 import (
 	"context"
